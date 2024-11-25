@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/static/css/layout.css">
+
+    <title>Cadastro de Itens</title>
+</head>
+
+<body>
+    <div id="wrap">
+        <header>
+            <a href="/"><h1>Cadastro de Itens.</h1></a>
+        </header>
+
+        {% if user %}
+        <nav>
+            <button onclick="location.href='/'">Listar</button>
+            <button onclick="location.href='/new'">Novo</button>
+            <span><a href="/profile">Olá {{ user.fname }}!</a></span>
+        </nav>
+        {% endif %}
+
+        <main>
+
+            {% block content %}{% endblock %}
+        </main>
+
+        <hr>
+
+        <footer>&copy; 2024 Xyz</footer>
+
+       
+    </div>
+
+    <script>
+        // Evita o reenvio dos formulários ao atualizar a página
+        if (window.history.replaceState) window.history.replaceState(null, null, window.location.href);
+    </script>
+</body>
+
+</html>
