@@ -1,416 +1,175 @@
-from flask import Flask, json, make_response, render_template, redirect, url_for, request
+# Importa as dependências do aplicativo
+from flask import Flask, abort, g, make_response, redirect, render_template, request, url_for
 from flask_mysqldb import MySQL
-from hashlib import sha1
-from datetime import datetime, timedelta
-import subprocess
-import random
-import string
+import json
+from functions.geral import calcular_idade, datetime_para_string, gerar_senha, remove_prefixo
 
+from modules.apagausuario import mod_apaga_usuario
+from modules.novasenha import nova_senha
+from modules.apaga import mod_apaga
+from modules.cadastro import mod_cadastro
+from modules.edita import mod_edita
+from modules.index import mod_index
+from modules.login import mod_login
+from modules.logout import mod_logout
+from modules.novo import mod_novo
+from modules.perfil import mod_perfil
+from modules.start import mod_start
+
+
+# Cria um aplicativo Flask chamado "app"
 app = Flask(__name__)
 
-# Configuração do MySQL
-app.config.update(
-    MYSQL_HOST='localhost',
-    MYSQL_USER='root',
-    MYSQL_PASSWORD='',
-    MYSQL_DB='cadastrodb',
-    MYSQL_CURSORCLASS='DictCursor',
-    MYSQL_CHARSET='utf8mb4',
-    MYSQL_USE_UNICODE=True
-)
+# Configurações de acesso ao MySQL
+app.config['MYSQL_HOST'] = 'localhost'
+app.config['MYSQL_USER'] = 'root'
+app.config['MYSQL_PASSWORD'] = ''
+app.config['MYSQL_DB'] = 'crudtrecos'
 
+# Setup da conexão com MySQL
+app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
+app.config['MYSQL_USE_UNICODE'] = True
+app.config['MYSQL_CHARSET'] = 'utf8mb4'
+
+# Variável de conexão com o MySQL
 mysql = MySQL(app)
 
 
-def send_email(email_to, subject, content):
-    url = "https://api.sendgrid.com/v3/mail/send"
-    api_key = "" # API KEY gerado no sendgrid.
-    email_from = "" # Email autenticado no sendgrid.
-
-    payload = {
-        "personalizations": [{
-            "to": [{
-                "email": email_to
-            }]
-        }],
-        "from": {
-            "email": email_from
-        },
-        "subject": subject,
-        "content": [{
-            "type": "text/plain",
-            "value": content
-        }]
-    }
-
-    result = subprocess.run([
-        "curl",
-        "--request", "POST",
-        "--url", url,
-        "--header", f"Authorization: Bearer {api_key}",
-        "--header", "Content-Type: application/json",
-        "--data", json.dumps(payload)
-    ], capture_output=True, text=True)
-
-    return result.stdout, result.stderr
-
-def get_new_password(tamanho=8):
-    caracteres = string.ascii_letters + string.digits + "_-$&"
-    return ''.join(random.choice(caracteres) for _ in range(tamanho))
-
-
-
 @app.before_request
-def before_request():
-    """Configurações de codificação para garantir o suporte a UTF-8."""
-    cur = mysql.connection.cursor()
-    cur.execute("SET NAMES utf8mb4")
-    cur.execute("SET character_set_connection=utf8mb4")
-    cur.execute("SET character_set_client=utf8mb4")
-    cur.execute("SET character_set_results=utf8mb4")
-    cur.execute("SET lc_time_names = 'pt_BR'")
-    cur.close()
-
-# Rota principal do aplicativo, exibe a página inicial com itens do usuário.
+def start():
+    mod_start(mysql)   
 
 
-@app.route('/')
-def home():
-
-    edit = request.args.get('edit')
-    delete = request.args.get('delete')
-
-    cookie = request.cookies.get('user_data')
-
-    if cookie == None:
-        return redirect(f"{url_for('login')}")
-
-    user = json.loads(cookie)
-    user['fname'] = user['name'].split()[0]
-
-    sql = '''
-        SELECT *
-        FROM item
-        WHERE
-            it_owner = %s
-            AND it_status != 'del'
-        ORDER BY it_date DESC;
-    '''
-    cur = mysql.connection.cursor()
-    cur.execute(sql, (user['id'], ))
-    things = cur.fetchall()
-    cur.close()
-
-    # Renderiza a página inicial com os itens do usuário
-    return render_template('home.html', things=things, user=user, edit=edit, delete=delete)
+# Rota raiz, equivalente a página inicial do site (index)
+@app.route("/")  
+def index():  # Função executada ao acessar a rota raiz
+    return mod_index(mysql)   
 
 
-# Rota de login para autenticação de usuários
-@app.route('/login', methods=['GET', 'POST'])
+# Rota para a página de cadastro de novo treco
+@app.route('/novo', methods=['GET', 'POST'])
+def novo():  # Função executada para cadastrar novo treco
+    return mod_novo(mysql=mysql)
+    
+
+@app.route('/edita/<id>', methods=['GET', 'POST'])
+def edita(id):
+    return mod_edita(mysql=mysql, id=id)
+   
+
+@app.route('/apaga/<id>')
+def apaga(id):
+    return mod_apaga(mysql, id)    
+
+
+@app.route('/login', methods=['GET', 'POST'])  # Rota para login de usuário
 def login():
-
-    error = ''
-
-    if request.method == 'POST':
-
-        form = dict(request.form)
-
-        sql = '''
-            SELECT ow_id, ow_name
-            FROM owner
-            WHERE ow_email = %s
-                AND ow_password = SHA1(%s)
-                AND ow_status = 'on'
-        '''
-        cur = mysql.connection.cursor()
-        cur.execute(sql, (form['email'], form['password'],))
-        user = cur.fetchone()
-        cur.close()
-
-        if user != None:
-            # Criação de um cookie de sessão para o usuário autenticado
-            resp = make_response(redirect(url_for('home')))
-
-            cookie_data = {
-                'id': user['ow_id'],
-                'name': user['ow_name']
-            }
-            # Data em que o cookie expira
-            expires = datetime.now() + timedelta(days=365)
-            # Adicona o cookie à página
-            resp.set_cookie('user_data', json.dumps(
-                cookie_data), expires=expires)
-
-            return resp
-        else:
-            error = 'Login e/ou senha errados!'
-
-    return render_template('login.html', error=error)
-
-
-@app.route('/new', methods=['GET', 'POST'])
-def new_item():
-    success = False
-
-    cookie = request.cookies.get('user_data')
-
-    if cookie == None:
-        return redirect(f"{url_for('login')}")
-
-    user = json.loads(cookie)
-    user['fname'] = user['name'].split()[0]
-
-    if request.method == 'POST':
-        form = dict(request.form)
-
-        sql = '''
-            INSERT INTO item (
-                it_owner, it_image, it_name, it_description, it_location
-            ) VALUES (
-                %s, %s, %s, %s, %s
-            )
-        '''
-        cur = mysql.connection.cursor()
-        cur.execute(sql, (user['id'], form['image'],
-                    form['name'], form['description'], form['location']))
-        mysql.connection.commit()
-        cur.close()
-
-        success = True
-
-    return render_template('new_item.html', user=user, success=success)
-
-
-@app.route('/view/<id>')
-def view(id):
-
-    cookie = request.cookies.get('user_data')
-
-    if cookie == None:
-        return redirect(f"{url_for('login')}")
-
-    user = json.loads(cookie)
-    user['fname'] = user['name'].split()[0]
-
-    sql = '''
-        SELECT it_id, it_date, it_image, it_name, it_description, it_location
-        FROM item
-        WHERE it_status = 'on' AND it_owner = %s AND it_id = %s
-    '''
-    cur = mysql.connection.cursor()
-    cur.execute(sql, (user['id'], id,))
-    thing = cur.fetchone()
-    cur.close()
-
-    return render_template('view.html', user=user, thing=thing)
-
-
-@app.route('/edit/<id>', methods=['GET', 'POST'])
-def edit(id):
-
-    cookie = request.cookies.get('user_data')
-
-    if cookie == None:
-        return redirect(url_for('login'))
-
-    user = json.loads(cookie)
-    user['fname'] = user['name'].split()[0]
-
-    if request.method == 'POST':
-
-        form = dict(request.form)
-
-        sql = '''
-            UPDATE item SET 
-                it_image = %s,
-                it_name = %s,
-                it_description = %s,
-                it_location = %s
-            WHERE it_status = 'on'
-                AND it_owner = %s
-                AND it_id = %s
-        '''
-        cur = mysql.connection.cursor()
-        cur.execute(sql, (form['image'], form['name'],
-                    form['description'], form['location'], user['id'], id,))
-        mysql.connection.commit()
-        cur.close()
-
-        return redirect(url_for('home', edit=True))
-
-    sql = '''
-        SELECT it_id, it_date, it_image, it_name, it_description, it_location
-        FROM item
-        WHERE it_status = 'on' AND it_owner = %s AND it_id = %s
-    '''
-    cur = mysql.connection.cursor()
-    cur.execute(sql, (user['id'], id,))
-    thing = cur.fetchone()
-    cur.close()
-
-    return render_template('edit.html', user=user, thing=thing)
-
-
-@app.route('/delete/<id>')
-def delete(id):
-
-    cookie = request.cookies.get('user_data')
-
-    if cookie == None:
-        return redirect(url_for('login'))
-
-    user = json.loads(cookie)
-    user['fname'] = user['name'].split()[0]
-
-    sql = '''
-        UPDATE item SET
-            it_status = 'del'
-        WHERE it_owner = %s
-            AND it_id = %s
-    '''
-    cur = mysql.connection.cursor()
-    cur.execute(sql, (user['id'], id,))
-    mysql.connection.commit()
-    cur.close()
-
-    return redirect(url_for('home', delete=True))
+    return mod_login(mysql)
 
 
 @app.route('/logout')
 def logout():
-
-    resp = make_response(redirect(url_for('login')))
-
-    resp.set_cookie('user_data', '', expires=0)
-
-    return resp
+    return mod_logout()
 
 
-@app.route('/newuser', methods=['GET', 'POST'])
-def newuser():
+@app.route('/cadastro', methods=['GET', 'POST'])  # Cadastro de usuário
+def cadastro():
+    return mod_cadastro(mysql)
+    
 
-    cookie = request.cookies.get('user_data')
-    if cookie != None:
-        return redirect(url_for('home'))
+@app.route('/novasenha', methods=['GET', 'POST'])  # Pedido de senha de usuário
+def novasenha():
+    return nova_senha(mysql)
+    
 
-    feedback = ''
-    form = {}
+@app.route('/perfil')
+def perfil():
+    return mod_perfil(mysql)
+
+
+@app.route('/apagausuario')
+def apagausuario():
+    return mod_apaga_usuario(mysql)
+
+
+@app.route('/editaperfil', methods=['GET', 'POST'])
+def editaperfil():
+
+    # Se o usuário não está logado redireciona para a página de login
+    if g.usuario == '':
+        return redirect(url_for('login'))
 
     if request.method == 'POST':
 
         form = dict(request.form)
 
+        # print('\n\n\n FORM:', form, '\n\n\n')
+
         sql = '''
-            SELECT count(ow_id) AS total
-            FROM owner
-            WHERE ow_email = %s
-                AND ow_status != 'del'
+            UPDATE usuario
+            SET u_nome = %s,
+                u_nascimento = %s,
+                u_email = %s
+            WHERE u_id = %s
+                AND u_senha = SHA1(%s)
         '''
         cur = mysql.connection.cursor()
-        cur.execute(sql, (form['email'], ))
-        total = int(cur.fetchone()['total'])
+        cur.execute(sql, (
+            form['nome'],
+            form['nascimento'],
+            form['email'],
+            g.usuario['id'],
+            form['senha1'],
+        ))
+        mysql.connection.commit()
         cur.close()
 
-        if total == 0:
-            sql = '''
-                INSERT INTO owner (ow_birth, ow_name, ow_email, ow_password)
-                VALUES (%s, %s, %s, SHA1(%s))
-            '''
+        # Se pediu para trocar a senha
+        if form['senha2'] != '':
+
+            sql = "UPDATE usuario SET u_senha = SHA1(%s) WHERE u_id = %s AND u_senha = SHA1(%s)"
             cur = mysql.connection.cursor()
-            cur.execute(sql, (form['birth'], form['name'],
-                        form['email'], form['password'],))
+            cur.execute(sql, (
+                form['senha2'],
+                g.usuario['id'],
+                form['senha1'],
+            ))
             mysql.connection.commit()
             cur.close()
 
-            feedback = 'success'
+        return redirect(url_for('logout'))
 
-        else:
-            form['email'] = ''
-            feedback = 'error'
-
-    return render_template('new_user.html', feedback=feedback, form=form)
-
-
-@app.route('/profile')
-def profile():
-
-    cookie = request.cookies.get('user_data')
-    if cookie == None:
-        return redirect(url_for('login'))
-    user = json.loads(cookie)
-    user['fname'] = user['name'].split()[0]
-
+    # Recebe dados do usuário
     sql = '''
-        SELECT *
-        FROM owner
-        WHERE ow_id = %s
-            AND ow_status = 'on'
+        SELECT * FROM usuario
+        WHERE u_id = %s
+            AND u_status = 'on'    
     '''
     cur = mysql.connection.cursor()
-    cur.execute(sql, (user['id'], ))
-    userdata = cur.fetchone()
+    cur.execute(sql, (g.usuario['id'],))
+    row = cur.fetchone()
     cur.close()
 
-    del userdata['ow_password']
+    # print('\n\n\n USER:', row, '\n\n\n')
 
-    return render_template('/profile.html', user=user, userdata=userdata)
-
-
-@app.route('/sendpass', methods=['GET', 'POST'])
-def sendpass():
-
-    if request.method == 'POST':
-        form = dict(request.form)
-        sql = '''
-            SELECT ow_id, ow_email, ow_name
-            FROM owner
-            WHERE ow_email = %s
-                AND ow_status = 'on'
-        '''
-        cur = mysql.connection.cursor()
-        cur.execute(sql, (form['email'], ))
-        userdata = cur.fetchone()
-        cur.close()
-
-        
-
-        if userdata != None:
-
-            new_password = get_new_password()
-
-            sql = '''
-                UPDATE owner
-                SET ow_password = SHA1(%s)
-                WHERE ow_id = %s
-                    AND ow_status = 'on'
-            '''
-            cur = mysql.connection.cursor()
-            cur.execute(sql, (new_password, userdata['ow_id'],))
-            mysql.connection.commit()
-            cur.close()
-
-            mail_message = f'''
-                Olá {userdata['ow_name']}!
-
-                Você pediu uma nova senha de acesso ao "Cadastro de Trecos".
-
-                Use esta senha para fazer login: {new_password}
-
-                Obrigado...
-            '''
-
-            resposta = send_email(
-                userdata['ow_email'],
-                'Cadastro de Itens - nova senha',
-                mail_message
-            )
-            feedback = 'success'
-        else:
-            feedback = 'error'
-            
-
-    return render_template('sendpass.html')
+    pagina = {
+        'titulo': 'CRUDTrecos - Erro 404',
+        'usuario': g.usuario,
+        'form': row
+    }
+    return render_template('editaperfil.html', **pagina)
 
 
+@app.errorhandler(404)
+def page_not_found(e):
+    pagina = {
+        'titulo': 'CRUDTrecos - Erro 404',
+        'usuario': g.usuario,
+    }
+    return render_template('404.html', **pagina), 404
+
+
+# Executa o servidor HTTP se estiver no modo de desenvolvimento
+# Remova / comente essas linhas no modo de produção
 if __name__ == '__main__':
     app.run(debug=True)
