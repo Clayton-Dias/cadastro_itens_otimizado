@@ -5,6 +5,7 @@ import json
 from functions.geral import calcular_idade, datetime_para_string, gerar_senha, remove_prefixo
 
 from modules.apagausuario import mod_apaga_usuario
+from modules.editaperfil import mod_edita_perfil
 from modules.novasenha import nova_senha
 from modules.apaga import mod_apaga
 from modules.cadastro import mod_cadastro
@@ -94,70 +95,7 @@ def apagausuario():
 
 @app.route('/editaperfil', methods=['GET', 'POST'])
 def editaperfil():
-
-    # Se o usuário não está logado redireciona para a página de login
-    if g.usuario == '':
-        return redirect(url_for('login'))
-
-    if request.method == 'POST':
-
-        form = dict(request.form)
-
-        # print('\n\n\n FORM:', form, '\n\n\n')
-
-        sql = '''
-            UPDATE usuario
-            SET u_nome = %s,
-                u_nascimento = %s,
-                u_email = %s
-            WHERE u_id = %s
-                AND u_senha = SHA1(%s)
-        '''
-        cur = mysql.connection.cursor()
-        cur.execute(sql, (
-            form['nome'],
-            form['nascimento'],
-            form['email'],
-            g.usuario['id'],
-            form['senha1'],
-        ))
-        mysql.connection.commit()
-        cur.close()
-
-        # Se pediu para trocar a senha
-        if form['senha2'] != '':
-
-            sql = "UPDATE usuario SET u_senha = SHA1(%s) WHERE u_id = %s AND u_senha = SHA1(%s)"
-            cur = mysql.connection.cursor()
-            cur.execute(sql, (
-                form['senha2'],
-                g.usuario['id'],
-                form['senha1'],
-            ))
-            mysql.connection.commit()
-            cur.close()
-
-        return redirect(url_for('logout'))
-
-    # Recebe dados do usuário
-    sql = '''
-        SELECT * FROM usuario
-        WHERE u_id = %s
-            AND u_status = 'on'    
-    '''
-    cur = mysql.connection.cursor()
-    cur.execute(sql, (g.usuario['id'],))
-    row = cur.fetchone()
-    cur.close()
-
-    # print('\n\n\n USER:', row, '\n\n\n')
-
-    pagina = {
-        'titulo': 'CRUDTrecos - Erro 404',
-        'usuario': g.usuario,
-        'form': row
-    }
-    return render_template('editaperfil.html', **pagina)
+    return mod_edita_perfil(mysql)    
 
 
 @app.errorhandler(404)

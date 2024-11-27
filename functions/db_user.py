@@ -90,3 +90,57 @@ def delete_user(mysql):
     cur.execute(sql, (g.usuario['id'],))
     mysql.connection.commit()
     cur.close()
+
+
+
+def edit_profile(mysql, form):
+        sql = '''
+            UPDATE usuario
+            SET u_nome = %s,
+                u_nascimento = %s,
+                u_email = %s
+            WHERE u_id = %s
+                AND u_senha = SHA1(%s)
+        '''
+        cur = mysql.connection.cursor()
+        cur.execute(sql, (
+            form['nome'],
+            form['nascimento'],
+            form['email'],
+            g.usuario['id'],
+            form['senha1'],
+        ))
+        mysql.connection.commit()
+        cur.close()
+
+
+def edit_profile_password(mysql,form):
+      #Edita a senha no perfil, caso usuário queria
+      
+      if form['senha2'] != '':
+
+            sql = "UPDATE usuario SET u_senha = SHA1(%s) WHERE u_id = %s AND u_senha = SHA1(%s)"
+            cur = mysql.connection.cursor()
+            cur.execute(sql, (
+                form['senha2'],
+                g.usuario['id'],
+                form['senha1'],
+            ))
+            mysql.connection.commit()
+            cur.close()   
+
+
+def get_all_date_user(mysql):
+    # Recebe todos os dados do usuário
+
+    sql = '''
+        SELECT * FROM usuario
+        WHERE u_id = %s
+            AND u_status = 'on'    
+    '''
+    cur = mysql.connection.cursor()
+    cur.execute(sql, (g.usuario['id'],))
+    row = cur.fetchone()
+    cur.close() 
+
+    return row       
